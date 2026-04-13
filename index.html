@@ -118,7 +118,13 @@ function stopScanner(){
   document.getElementById("stopBtn").style.display  = "none";
   setStatus("Scanner stopped");
 }
-
+if(code && code.data){
+  processing = true;
+  scanning   = false;
+  setStatus("✅ QR: " + code.data.substring(0,40)); // ✅ এই line যোগ করো
+  processQR(code.data);
+  return;
+}
 function processQR(url){
   setStatus("⏳ Attendance mark করছে...");
   try{
