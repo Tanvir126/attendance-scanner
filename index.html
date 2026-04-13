@@ -2,197 +2,175 @@
 <html>
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
   <style>
     * { box-sizing:border-box; margin:0; padding:0; }
-    body {
-      font-family:Arial,sans-serif; background:#f0f4ff;
-      display:flex; align-items:center; justify-content:center;
-      min-height:100vh; padding:16px;
-    }
-    .card {
-      background:white; border-radius:16px; padding:20px;
-      max-width:380px; width:100%;
-      box-shadow:0 4px 20px rgba(0,0,0,0.1); text-align:center;
-    }
-    .logo    { font-size:32px; margin-bottom:4px; }
-    .coaching{ font-size:14px; font-weight:800; color:#0b57d0; margin-bottom:4px; }
-    .sub     { font-size:11px; color:#888; margin-bottom:16px; }
-    video {
-      width:100%; border-radius:10px; background:#000;
-      max-height:280px; display:block; margin-bottom:12px;
-    }
-    button {
-      width:100%; padding:12px; font-size:14px; font-weight:700;
-      border:none; border-radius:8px; cursor:pointer; margin-bottom:8px;
-    }
+    body { font-family:Arial,sans-serif; background:#f0f4ff; display:flex; align-items:center; justify-content:center; min-height:100vh; padding:16px; }
+    .card { background:white; border-radius:16px; padding:20px; max-width:380px; width:100%; box-shadow:0 4px 20px rgba(0,0,0,0.1); text-align:center; }
+    .logo { font-size:32px; margin-bottom:4px; }
+    .coaching { font-size:14px; font-weight:800; color:#0b57d0; margin-bottom:4px; }
+    .sub { font-size:11px; color:#888; margin-bottom:16px; }
+    #video { width:100%; border-radius:10px; background:#000; display:none; margin-bottom:8px; }
+    button { width:100%; padding:12px; font-size:14px; font-weight:700; border:none; border-radius:8px; cursor:pointer; margin-bottom:8px; }
     .btn-start { background:#0b57d0; color:white; }
     .btn-stop  { background:#c62828; color:white; display:none; }
-    .result {
-      padding:14px; border-radius:10px; font-size:14px;
-      font-weight:700; margin-top:10px; display:none;
-      text-align:left; line-height:1.5;
-    }
+    .result { padding:14px; border-radius:10px; font-size:14px; font-weight:700; margin-top:10px; display:none; white-space:pre-line; text-align:left; }
     .success { background:#e8f5e9; color:#2e7d32; border-left:4px solid #2e7d32; }
     .error   { background:#ffebee; color:#c62828; border-left:4px solid #c62828; }
     .warning { background:#fff8e1; color:#f57f17; border-left:4px solid #f57f17; }
-    .hint { font-size:12px; color:#888; margin-bottom:8px; }
-    .scan-box {
-      border:2px dashed #0b57d0; border-radius:10px;
-      padding:6px; margin-bottom:8px; display:none;
-    }
+    #status { font-size:12px; color:#666; margin-bottom:8px; min-height:20px; }
   </style>
 </head>
 <body>
 <div class="card">
   <div class="logo">⚗️</div>
   <div class="coaching">Chemistry with Tanvir Sir</div>
-  <div class="sub">Attendance Scanner — No time restriction</div>
+  <div class="sub">Attendance Scanner</div>
 
-  <div class="scan-box" id="scanBox">
-    <video id="video" playsinline></video>
-  </div>
+  <video id="video" playsinline autoplay muted></video>
   <canvas id="canvas" style="display:none;"></canvas>
 
-  <p class="hint" id="hint">📷 Scanner চালু করে student এর QR scan করো</p>
+  <div id="status">Scanner ready</div>
   <button class="btn-start" id="startBtn" onclick="startScanner()">📷 Scanner চালু করো</button>
-  <button class="btn-stop"  id="stopBtn"  onclick="stopScanner()">⏹️ Scanner বন্ধ করো</button>
-
+  <button class="btn-stop"  id="stopBtn"  onclick="stopScanner()">⏹️ বন্ধ করো</button>
   <div class="result" id="result"></div>
 </div>
 
 <script>
-  const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwGG8b4GbrZ5lUy-Hm10bvNzK17mZ1bBPVCoUeH1fECIRDRMCXMAul4aDtHIUGXFOFQ/exec";
+const DEPLOY_URL = "https://script.google.com/macros/s/AKfycbwGG8b4GbrZ5lUy-Hm10bvNzK17mZ1bBPVCoUeH1fECIRDRMCXMAul4aDtHIUGXFOFQ/exec";
 
-  let stream=null, running=false, interval=null, processing=false;
+let stream=null, scanning=false, processing=false, rafId=null;
 
-  function startScanner() {
-    const video=document.getElementById("video");
-    const scanBox=document.getElementById("scanBox");
-    const startBtn=document.getElementById("startBtn");
-    const stopBtn=document.getElementById("stopBtn");
-    const result=document.getElementById("result");
-    const hint=document.getElementById("hint");
-    result.style.display="none";
+// jsQR dynamically load
+const script = document.createElement('script');
+script.src = 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js';
+script.onload  = () => setStatus("✅ Ready to scan");
+script.onerror = () => setStatus("❌ Library load failed");
+document.head.appendChild(script);
 
-    navigator.mediaDevices.getUserMedia({
-      video:{ facingMode:"environment", width:{ideal:1280}, height:{ideal:720} }
-    })
-    .then(function(s){
-      stream=s; running=true;
-      video.srcObject=s; video.play();
-      scanBox.style.display="block";
-      startBtn.style.display="none";
-      stopBtn.style.display="block";
-      hint.textContent="📷 Student এর ID card এর QR scan করো...";
-      interval=setInterval(()=>scanFrame(video),400);
-    })
-    .catch(function(err){
-      result.className="result error";
-      result.style.display="block";
-      result.textContent="❌ Camera চালু করতে পারছি না। Browser settings থেকে camera permission দিন।\n\nError: "+err.message;
-    });
-  }
+function setStatus(msg){ document.getElementById("status").textContent = msg; }
 
-  function stopScanner(){
-    if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}
-    running=false; clearInterval(interval); processing=false;
-    document.getElementById("video").srcObject=null;
-    document.getElementById("scanBox").style.display="none";
-    document.getElementById("startBtn").style.display="block";
-    document.getElementById("stopBtn").style.display="none";
-    document.getElementById("hint").textContent="📷 Scanner চালু করে student এর QR scan করো";
-  }
+function startScanner(){
+  const video = document.getElementById("video");
+  setStatus("📷 Camera চালু হচ্ছে...");
 
-  function scanFrame(video){
-    if(!running||processing||video.readyState!==video.HAVE_ENOUGH_DATA) return;
-    const canvas=document.getElementById("canvas");
-    const ctx=canvas.getContext("2d");
-    canvas.width=video.videoWidth; canvas.height=video.videoHeight;
-    ctx.drawImage(video,0,0,canvas.width,canvas.height);
-    const imageData=ctx.getImageData(0,0,canvas.width,canvas.height);
-    if(typeof jsQR==="undefined") return;
-    const code=jsQR(imageData.data,imageData.width,imageData.height);
-    if(code){ processing=true; clearInterval(interval); processQR(code.data); }
-  }
+  navigator.mediaDevices.getUserMedia({
+    video: { facingMode: { ideal: "environment" }, width: { ideal: 640 }, height: { ideal: 480 } }
+  })
+  .then(s => {
+    stream = s;
+    video.srcObject = s;
+    video.style.display = "block";
+    document.getElementById("startBtn").style.display = "none";
+    document.getElementById("stopBtn").style.display  = "block";
+    document.getElementById("result").style.display   = "none";
 
-  function processQR(url){
-    const result=document.getElementById("result");
-    const hint=document.getElementById("hint");
-    result.className="result warning";
-    result.style.display="block";
-    result.textContent="⏳ Processing...";
-    hint.textContent="⏳ Attendance check করছে...";
+    video.onloadedmetadata = () => {
+      video.play();
+      setStatus("🔍 Scanning... (" + video.videoWidth + "x" + video.videoHeight + ")");
+      scanning = true;
+      requestAnimationFrame(tick);
+    };
+  })
+  .catch(err => {
+    setStatus("❌ Camera error: " + err.message);
+  });
+}
 
-    try{
-      const urlObj=new URL(url);
-      const id=urlObj.searchParams.get("id");
-      const mobile=urlObj.searchParams.get("mobile");
+function tick(){
+  if(!scanning) return;
+  const video  = document.getElementById("video");
+  const canvas = document.getElementById("canvas");
 
-      if(!id||!mobile){
-        showResult("error","❌ Invalid QR Code — এটা attendance QR না");
+  if(video.readyState === video.HAVE_ENOUGH_DATA && video.videoWidth > 0){
+    canvas.width  = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(video, 0, 0);
+
+    if(typeof jsQR !== "undefined" && !processing){
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const code = jsQR(imageData.data, imageData.width, imageData.height, {
+        inversionAttempts: "dontInvert"
+      });
+
+      if(code && code.data){
+        processing = true;
+        scanning   = false;
+        setStatus("✅ QR found!");
+        processQR(code.data);
         return;
       }
-
-      // scanner=true দিয়ে call করো — time restriction নেই
-      const apiUrl=`${APPS_SCRIPT_URL}?id=${encodeURIComponent(id)}&mobile=${encodeURIComponent(mobile)}&scanner=true`;
-
-      fetch(apiUrl,{redirect:'follow'})
-        .then(res=>res.text())
-        .then(html=>{
-          const successMatch=html.match(/✅[^<\n]+/);
-          const warningMatch=html.match(/⚠️[^<\n]+/);
-          const errorMatch=html.match(/❌[^<\n]+/);
-          const nameMatch=html.match(/class="sname">([^<]+)</);
-          const msgMatch=html.match(/class="smsg">([^<]+)</);
-
-          let name=nameMatch?nameMatch[1].trim():'';
-          let msg=msgMatch?msgMatch[1].trim():'';
-
-          if(successMatch) showResult("success",`✅ Attendance নেওয়া হয়েছে!\n${name}\n${msg}`);
-          else if(warningMatch) showResult("warning",`⚠️ ${warningMatch[0].replace('⚠️','').trim()}\n${name}`);
-          else if(errorMatch) showResult("error",`❌ ${errorMatch[0].replace('❌','').trim()}`);
-          else showResult("success","✅ Done!");
-        })
-        .catch(err=>showResult("error","❌ Network error: "+err.message));
-
-    }catch(e){showResult("error","❌ Invalid QR Code");}
+    }
   }
- function scanFrame(video){
-    if(!running||processing||video.readyState!==video.HAVE_ENOUGH_DATA) return;
-    const canvas=document.getElementById("canvas");
-    const ctx=canvas.getContext("2d");
-    canvas.width=video.videoWidth; canvas.height=video.videoHeight;
-    ctx.drawImage(video,0,0,canvas.width,canvas.height);
-    const imageData=ctx.getImageData(0,0,canvas.width,canvas.height);
-    if(typeof jsQR==="undefined"){
-      document.getElementById("hint").textContent="❌ jsQR not loaded";
+
+  rafId = requestAnimationFrame(tick);
+}
+
+function stopScanner(){
+  scanning   = false;
+  processing = false;
+  if(rafId) cancelAnimationFrame(rafId);
+  if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; }
+  const video = document.getElementById("video");
+  video.srcObject  = null;
+  video.style.display = "none";
+  document.getElementById("startBtn").style.display = "block";
+  document.getElementById("stopBtn").style.display  = "none";
+  setStatus("Scanner stopped");
+}
+
+function processQR(url){
+  setStatus("⏳ Attendance mark করছে...");
+  try{
+    const urlObj = new URL(url);
+    const id     = urlObj.searchParams.get("id");
+    const mobile = urlObj.searchParams.get("mobile");
+
+    if(!id || !mobile){
+      showResult("error", "❌ Invalid QR Code");
       return;
     }
-    const code=jsQR(imageData.data,imageData.width,imageData.height,{
-      inversionAttempts: "dontInvert"  // ✅ এটা যোগ করো
-    });
-    if(code){
-      document.getElementById("hint").textContent="✅ QR found: "+code.data.substring(0,30);
-      processing=true; clearInterval(interval); processQR(code.data);
-    } else {
-      // Debug — QR খুঁজছে
-      document.getElementById("hint").textContent="🔍 Scanning... ("+video.videoWidth+"x"+video.videoHeight+")";
-    }
-  }
-  function showResult(type,message){
-    const result=document.getElementById("result");
-    const hint=document.getElementById("hint");
-    result.className="result "+type;
-    result.style.display="block";
-    result.textContent=message;
-    hint.textContent="📷 Student এর ID card এর QR scan করো...";
 
-    setTimeout(()=>{
-      processing=false;
-      if(stream){running=true;interval=setInterval(()=>scanFrame(document.getElementById("video")),400);}
-    },3000);
+    const apiUrl = `${DEPLOY_URL}?id=${encodeURIComponent(id)}&mobile=${encodeURIComponent(mobile)}&scanner=true`;
+
+    fetch(apiUrl, { redirect: 'follow' })
+      .then(r => r.text())
+      .then(html => {
+        const s = html.match(/✅[^<\n]*/);
+        const w = html.match(/⚠️[^<\n]*/);
+        const e = html.match(/❌[^<\n]*/);
+        const n = html.match(/class="sname">([^<]+)/);
+        const m = html.match(/class="smsg">([^<]+)/);
+
+        const name = n ? "\n" + n[1].trim() : "";
+        const msg  = m ? "\n" + m[1].trim() : "";
+
+        if(s)      showResult("success", s[0].trim() + name + msg);
+        else if(w) showResult("warning", w[0].trim() + name);
+        else if(e) showResult("error",   e[0].trim());
+        else       showResult("success", "✅ Done!" + name);
+      })
+      .catch(err => showResult("error", "❌ Network error\n" + err.message));
+
+  } catch(e){
+    showResult("error", "❌ Invalid QR\n" + url.substring(0,50));
   }
+}
+
+function showResult(type, msg){
+  const el = document.getElementById("result");
+  el.className     = "result " + type;
+  el.style.display = "block";
+  el.textContent   = msg;
+  setStatus("⏳ 3s পর আবার scan হবে...");
+
+  setTimeout(() => {
+    processing = false;
+    scanning   = true;
+    setStatus("🔍 Scanning...");
+    requestAnimationFrame(tick);
+  }, 3000);
+}
 </script>
 </body>
 </html>
