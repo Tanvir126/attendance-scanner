@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+  <style>
+    * { box-sizing:border-box; margin:0; padding:0; }
+    body {
+      font-family:Arial,sans-serif; background:#f0f4ff;
+      display:flex; align-items:center; justify-content:center;
+      min-height:100vh; padding:16px;
+    }
+    .card {
+      background:white; border-radius:16px; padding:20px;
+      max-width:380px; width:100%;
+      box-shadow:0 4px 20px rgba(0,0,0,0.1); text-align:center;
+    }
+    .logo    { font-size:32px; margin-bottom:4px; }
+    .coaching{ font-size:14px; font-weight:800; color:#0b57d0; margin-bottom:16px; }
+    video {
+      width:100%; border-radius:10px; background:#000;
+      max-height:280px; display:block; margin-bottom:12px;
+    }
+    button {
+      width:100%; padding:12px; font-size:14px; font-weight:700;
+      border:none; border-radius:8px; cursor:pointer; margin-bottom:8px;
+    }
+    .btn-start { background:#0b57d0; color:white; }
+    .btn-stop  { background:#c62828; color:white; display:none; }
+    .result {
+      padding:14px; border-radius:10px; font-size:14px;
+      font-weight:700; margin-top:10px; display:none;
+    }
+    .success { background:#e8f5e9; color:#2e7d32; border-left:4px solid #2e7d32; }
+    .error   { background:#ffebee; color:#c62828; border-left:4px solid #c62828; }
+    .warning { background:#fff8e1; color:#f57f17; border-left:4px solid #f57f17; }
+    .scanning-hint { font-size:12px; color:#888; margin-bottom:8px; }
+  </style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">⚗️</div>
+  <div class="coaching">Chemistry with Tanvir Sir<br>
+    <span style="font-size:11px;font-weight:400;color:#666;">Attendance Scanner</span>
+  </div>
+
+  <video id="video" playsinline></video>
+  <canvas id="canvas" style="display:none;"></canvas>
+
+  <p class="scanning-hint" id="hint">📷 Scanner চালু করে QR scan করো</p>
+  <button class="btn-start" id="startBtn" onclick="startScanner()">📷 Scanner চালু করো</button>
+  <button class="btn-stop"  id="stopBtn"  onclick="stopScanner()">⏹️ বন্ধ করো</button>
+
+  <div class="result" id="result"></div>
+</div>
+
+<script>
+  // ✅ তোমার Apps Script Deploy URL
+  const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwGG8b4GbrZ5lUy-Hm10bvNzK17mZ1bBPVCoUeH1fECIRDRMCXMAul4aDtHIUGXFOFQ/exec";
+
+  let stream    = null;
+  let running   = false;
+  let interval  = null;
+  let processing = false;
+
+  function startScanner() {
+    const video    = document.getElementById("video");
+    const startBtn = document.getElementById("startBtn");
+    const stopBtn  = document.getElementById("stopBtn");
+    const result   = document.getElementById("result");
+    const hint     = document.getElementById("hint");
+
+    result.style.display = "none";
+
+    navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } }
+    })
+    .then(function(s) {
+      stream  = s;
+      running = true;
+      video.srcObject = s;
+      video.play();
+      startBtn.style.display = "none";
+      stopBtn.style.display  = "block";
+      hint.textContent       = "📷 QR Code এর সামনে ধরো...";
+      interval = setInterval(() => scanFrame(video), 400);
+    })
+    .catch(function(err) {
+      result.className    = "result error";
+      result.style.display = "block";
+      result.textContent  = "❌ Camera চালু করতে পারছি না: " + err.message;
+    });
+  }
+
+  function stopScanner() {
+    if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+    running = false;
+    clearInterval(interval);
+    document.getElementById("video").srcObject    = null;
+    document.getElementById("startBtn").style.display = "block";
+    document.getElementById("stopBtn").style.display  = "none";
+    document.getElementById("hint").textContent       = "📷 Scanner চালু করে QR scan করো";
+  }
+
+  function scanFrame(video) {
+    if (!running || processing || video.readyState !== video.HAVE_ENOUGH_DATA) return;
+    const canvas  = document.getElementById("canvas");
+    const ctx     = canvas.getContext("2d");
+    canvas.width  = video.videoWidth;
+    canvas.height = video.videoHeight;
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    if (typeof jsQR === "undefined") return;
+    const code = jsQR(imageData.data, imageData.width, imageData.height);
+    if (code) {
+      processing = true;
+      clearInterval(interval);
+      processQR(code.data);
+    }
+  }
+
+  function processQR(url) {
+    const result = document.getElementById("result");
+    const hint   = document.getElementById("hint");
+
+    result.className    = "result warning";
+    result.style.display = "block";
+    result.textContent  = "⏳ Processing...";
+    hint.textContent    = "⏳ Checking...";
+
+    try {
+      const urlObj = new URL(url);
+      const id     = urlObj.searchParams.get("id");
+      const mobile = urlObj.searchParams.get("mobile");
+
+      if (!id || !mobile) {
+        showResult("error", "❌ Invalid QR Code");
+        return;
+      }
+
+      // Apps Script এ call করো
+      const apiUrl = `${APPS_SCRIPT_URL}?id=${encodeURIComponent(id)}&mobile=${encodeURIComponent(mobile)}&scanner=true`;
+
+      fetch(apiUrl)
+        .then(res => res.text())
+        .then(html => {
+          // HTML থেকে message বের করো
+          const successMatch = html.match(/✅[^<]+/);
+          const warningMatch = html.match(/⚠️[^<]+/);
+          const errorMatch   = html.match(/❌[^<]+/);
+
+          if (successMatch) showResult("success", successMatch[0].trim());
+          else if (warningMatch) showResult("warning", warningMatch[0].trim());
+          else if (errorMatch) showResult("error", errorMatch[0].trim());
+          else showResult("success", "✅ Done!");
+        })
+        .catch(err => {
+          showResult("error", "❌ Connection error: " + err.message);
+        });
+
+    } catch(e) {
+      showResult("error", "❌ Invalid QR Code");
+    }
+  }
+
+  function showResult(type, message) {
+    const result = document.getElementById("result");
+    const hint   = document.getElementById("hint");
+
+    result.className    = "result " + type;
+    result.style.display = "block";
+    result.textContent  = message;
+    hint.textContent    = "📷 QR Code এর সামনে ধরো...";
+
+    // 3 সেকেন্ড পর আবার scan
+    setTimeout(() => {
+      processing = false;
+      if (stream) {
+        running  = true;
+        interval = setInterval(() => scanFrame(document.getElementById("video")), 400);
+      }
+    }, 3000);
+  }
+</script>
+</body>
+</html>
